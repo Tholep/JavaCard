@@ -32,7 +32,7 @@ public class personTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+    	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 
 	static final String MSG_ERROR = "Error";
@@ -50,7 +50,7 @@ public class personTerminal extends JPanel implements ActionListener {
 	private static final byte INS_KEY = (byte) 0x41;
 	private static final byte INS_ID = (byte) 0x42;
 
-    private static byte[] secretkey = null ;
+    	private static byte[] secretkey = null ;
     
 	Cipher ecipher;
 	Cipher dcipher;
@@ -85,12 +85,12 @@ public class personTerminal extends JPanel implements ActionListener {
 		add(new JScrollPane(display), BorderLayout.NORTH);
 		
 		issueButton = new JButton("Issue");
-        button = new JPanel(new FlowLayout());
+        	button = new JPanel(new FlowLayout());
 		button.add(issueButton);
 
-	    add(button, BorderLayout.SOUTH);
+	    	add(button, BorderLayout.SOUTH);
 		
-	    parent.addWindowListener(new CloseEventListener());		
+	    	parent.addWindowListener(new CloseEventListener());		
 	}
     
 	/**
@@ -120,7 +120,6 @@ public class personTerminal extends JPanel implements ActionListener {
 							if (c.isCardPresent()) {
 								try {
 									Card card = c.connect("*");
-									//System.out.println("Card: " + card);
 									try {
 										applet = card.getBasicChannel();
 										ResponseAPDU resp = applet.transmit(SELECT_APDU);
@@ -208,28 +207,28 @@ public class personTerminal extends JPanel implements ActionListener {
 				} catch (FileNotFoundException e) {
 		          		System.out.println("File Not Found.\n");
 		          		e.printStackTrace();
-		        }
+		        	}
 	        
-				// Generate ID of the card//
+				/** Generate ID of the card */
 				SecureRandom random = new SecureRandom();
-			    byte ID[] = new byte[16];
-			    random.nextBytes(ID);
-			    //System.out.println("Card id: " + toHexString(ID));
+				byte ID[] = new byte[16];
+				random.nextBytes(ID);
+				//System.out.println("Card id: " + toHexString(ID));
 			    
 			    
-			    //create the key of the card
-			    SecretKey key = new SecretKeySpec(secretkey, 0, secretkey.length, "AES");
-			    byte[] key_ID = encrypt(ID,key);			    
-			    
-			    //System.out.println("Card key: " + toHexString(key_ID));
-			    
-			    //System.out.println("Master key: " + toHexString(secretkey));
-			    
-			    //sends the key to the card
+				/** Create the key of the card */
+				SecretKey key = new SecretKeySpec(secretkey, 0, secretkey.length, "AES");
+				byte[] key_ID = encrypt(ID,key);			    
+				    
+				//System.out.println("Card key: " + toHexString(key_ID));
+
+				//System.out.println("Master key: " + toHexString(secretkey));
+				    
+			    	/** Sends the key to the card */
 				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_KEY,(byte) 0,(byte) 0,key_ID, BLOCKSIZE);
 				applet.transmit(capdu2);
 				
-				//sends the id to the card
+				/** Sends the id to the card */
 				CommandAPDU capdu3 = new CommandAPDU(CLA_WALLET, INS_ID,(byte) 0,(byte) 0,ID, BLOCKSIZE);
 				applet.transmit(capdu3);
 							

@@ -1,3 +1,5 @@
+//asdadas
+
 package terminal;
 
 import java.awt.*;
@@ -24,7 +26,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+   	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 
 	static final String MSG_ERROR = "Error";

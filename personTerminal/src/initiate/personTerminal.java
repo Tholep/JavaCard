@@ -19,6 +19,9 @@ import java.security.SecureRandom;
 
 import javax.smartcardio.*;
 
+import java.util.*;
+
+
 
 /**
  * Terminal for the Personalization phase of the E-Purse applet.
@@ -32,7 +35,7 @@ public class personTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 
 	static final String MSG_ERROR = "Error";
@@ -49,8 +52,9 @@ public class personTerminal extends JPanel implements ActionListener {
 	private static final byte INS_ISSUE = (byte) 0x40;
 	private static final byte INS_KEY = (byte) 0x41;
 	private static final byte INS_ID = (byte) 0x42;
+	private static final byte INS_BLDT = (byte) 0x43;
 
-    	private static byte[] secretkey = null ;
+    private static byte[] masterkey = null ;
     
 	Cipher ecipher;
 	Cipher dcipher;
@@ -85,12 +89,12 @@ public class personTerminal extends JPanel implements ActionListener {
 		add(new JScrollPane(display), BorderLayout.NORTH);
 		
 		issueButton = new JButton("Issue");
-        	button = new JPanel(new FlowLayout());
+        button = new JPanel(new FlowLayout());
 		button.add(issueButton);
 
-	    	add(button, BorderLayout.SOUTH);
+	    add(button, BorderLayout.SOUTH);
 		
-	    	parent.addWindowListener(new CloseEventListener());		
+	    parent.addWindowListener(new CloseEventListener());		
 	}
     
 	/**
@@ -120,6 +124,7 @@ public class personTerminal extends JPanel implements ActionListener {
 							if (c.isCardPresent()) {
 								try {
 									Card card = c.connect("*");
+									//System.out.println("Card: " + card);
 									try {
 										applet = card.getBasicChannel();
 										ResponseAPDU resp = applet.transmit(SELECT_APDU);
@@ -133,7 +138,7 @@ public class personTerminal extends JPanel implements ActionListener {
 
 										break;
 									} catch (Exception e) {
-										System.out.println("Card does not contain E-purse Applet!");
+										display.setText("Card does not contain E-purse Applet!");
 										sleep(2000);
 										continue;
 									}
@@ -195,11 +200,11 @@ public class personTerminal extends JPanel implements ActionListener {
 				issueButton.setEnabled(false);
 			} else{
 			    File file = new File("key");
-			    secretkey = new byte[(int) file.length()];
+			    masterkey = new byte[(int) file.length()];
 			    try {
 			       FileInputStream fileInputStream = new FileInputStream(file);
 			       try {
-					fileInputStream.read(secretkey);
+					fileInputStream.read(masterkey);
 				   } catch (IOException e) {
 				        System.out.println("Error Reading The File.\n");
 			        	e.printStackTrace();
@@ -207,31 +212,62 @@ public class personTerminal extends JPanel implements ActionListener {
 				} catch (FileNotFoundException e) {
 		          		System.out.println("File Not Found.\n");
 		          		e.printStackTrace();
-		        	}
+		        }
 	        
-				/** Generate ID of the card */
+				// Generate ID of the card//
 				SecureRandom random = new SecureRandom();
-				byte ID[] = new byte[16];
-				random.nextBytes(ID);
-				//System.out.println("Card id: " + toHexString(ID));
+			    byte ID[] = new byte[16];
+			    random.nextBytes(ID);
+			    //System.out.println("Card id: " + toHexString(ID));
 			    
-			    
-				/** Create the key of the card */
-				SecretKey key = new SecretKeySpec(secretkey, 0, secretkey.length, "AES");
-				byte[] key_ID = encrypt(ID,key);			    
-				    
-				//System.out.println("Card key: " + toHexString(key_ID));
+				File file1 = new File("cards_id.txt");
 
-				//System.out.println("Master key: " + toHexString(secretkey));
-				    
-			    	/** Sends the key to the card */
+				if (!file1.exists()) {
+					file1.createNewFile();
+				}
+
+				FileWriter fw = new FileWriter(file1.getAbsoluteFile(), true);
+				BufferedWriter bw = new BufferedWriter(fw);
+				bw.write(toHexString(ID));
+				bw.newLine();
+				bw.close();
+			    
+			    //create the key of the card
+			    SecretKey key_m = new SecretKeySpec(masterkey, 0, masterkey.length, "AES");
+			    byte[] key_ID = encrypt(ID,key_m);			    
+			    
+			    //System.out.println("Card key: " + toHexString(key_ID));
+			    
+			    //System.out.println("Master key: " + toHexString(masterkey));
+			    
+			    //sends the key to the card
 				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_KEY,(byte) 0,(byte) 0,key_ID, BLOCKSIZE);
 				applet.transmit(capdu2);
 				
-				/** Sends the id to the card */
+				//sends the id to the card
 				CommandAPDU capdu3 = new CommandAPDU(CLA_WALLET, INS_ID,(byte) 0,(byte) 0,ID, BLOCKSIZE);
 				applet.transmit(capdu3);
-							
+				
+				/** Create the blocking date of the card */
+				Date date = new Date();
+		        
+				Calendar cal = Calendar.getInstance();
+				cal.setTime(date);
+				short month = (short) cal.get(Calendar.MONTH);
+				short year = (short) cal.get(Calendar.YEAR);
+				year = (short) (year + (short) 3);
+				month = (short) (month + (short) 3);
+
+				byte[] bl_date = new byte[4];
+				
+				bl_date[0] = (byte)((year & 0xFF00) >> 8);
+				bl_date[1] = (byte)((year & 0x00FF) >> 0);
+				bl_date[2] = (byte)((month & 0xFF00) >> 8);
+				bl_date[3] = (byte)((month & 0x00FF) >> 0);
+				
+				CommandAPDU capdu4 = new CommandAPDU(CLA_WALLET, INS_BLDT,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
+				applet.transmit(capdu4);
+				
 				display.append("The card is issued\n");
 				issueButton.setEnabled(false);
 			}
@@ -262,8 +298,9 @@ public class personTerminal extends JPanel implements ActionListener {
 	 * 
 	 * @param arg
 	 *            command line arguments.
+	 * @throws IOException 
 	 */
-	public static void main(String[] arg) {
+	public static void main(String[] arg) throws IOException {
 		JFrame frame = new JFrame(TITLE);
 		frame.setSize(new Dimension(300,300));
 		frame.setResizable(false);

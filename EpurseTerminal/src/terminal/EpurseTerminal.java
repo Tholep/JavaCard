@@ -1,5 +1,3 @@
-/** Terminal for credit, debit and balance */
-
 package terminal;
 
 import java.awt.*;
@@ -7,7 +5,11 @@ import java.awt.event.*;
 import java.io.*;
 
 import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
+import java.util.Scanner;
+
 import javax.swing.*;
 
 import javax.crypto.Cipher;
@@ -16,12 +18,15 @@ import javax.crypto.spec.SecretKeySpec;
 
 //import java.security.*;
 //import java.security.spec.*;
-//import java.security.interfaces.*;
+//import java.security.interfaces.*;s
 import java.security.SecureRandom;
 
 import javax.smartcardio.*;
 
 
+/**
+ * Sample terminal for the E-Purse applet.
+ */
 public class EpurseTerminal extends JPanel implements ActionListener {
 
 	static final int BLOCKSIZE = 128;
@@ -31,11 +36,11 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 
-	static final String MSG_ERROR = "Error";
-	static final String MSG_INVALID = "Invalid";
+	//static final String MSG_ERROR = "Error";
+	//static final String MSG_INVALID = "Invalid";
 
 	static final byte[] APPLET_AID = { (byte) 0x3B, (byte) 0x29,
         (byte) 0x63, (byte) 0x61, (byte) 0x6C, (byte) 0x63, (byte) 0x01 };
@@ -45,8 +50,11 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			(byte) 0xA4, (byte) 0x04, (byte) 0x00, APPLET_AID);
 
 	private static final byte CLA_WALLET = (byte) 0xCC;
-	private static final byte INS_NONCE = (byte) 0x43;
-	private static final byte INS_SESSION = (byte) 0x44;
+	private static final byte INS_NONCE = (byte) 0x44;
+	private static final byte INS_SESSION = (byte) 0x45;
+	private static final byte INS_CHECK_DATE = (byte) 0x46;
+	private static final byte INS_CHECK_BLOCK = (byte) 0x47;
+	private static final byte INS_BLOCK = (byte) 0x48;
 	private static final byte INS_BALANCE = (byte) 0xE0;
 	private static final byte INS_CREDIT = (byte) 0xD0;
 	private static final byte INS_DEBIT = (byte) 0x32;
@@ -54,11 +62,11 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	private int counter = 0;
 	
 	//The master symmetric key of terminal
-	private static byte[] secretkey = null ;
-	static SecretKey key_m;
+    private static byte[] secretkey = null ;
+    static SecretKey key_m;
     
-	//The session key established during authentication
-	static SecretKey key_session;
+    //The session key established during authentication
+    static SecretKey key_session;
     
 	Cipher ecipher;
 	Cipher dcipher;
@@ -70,7 +78,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	/** GUI stuff. */
 	JButton creditButton,debitButton,balanceButton,clearButton;
 
-	/** The card applet. */
+		/** The card applet. */
 	CardChannel applet;
 
 	/**
@@ -114,7 +122,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		key("0");
 		key(".");
 		keypad.add(clearButton);
-
+		
 		add(keypad, BorderLayout.CENTER);
 		
 		amountfield = new JTextArea(AMOUNT_HEIGHT, AMOUNT_WIDTH);
@@ -125,7 +133,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		amountfield.setForeground(Color.green);
 		amountfield.setText("0");
 		add(amountfield, BorderLayout.NORTH);
-
+		
 		parent.addWindowListener(new CloseEventListener());		
 	}
 	
@@ -180,11 +188,21 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 											throw new Exception("Select failed");
 										}
 										else{
-											if (authenticate() == 1){
-												display.setText("Authenticate");
+											if (check_block() == 1){
+												if (check_date() == 1){
+													if (authenticate() == 1){
+														display.setText("Authenticated");
+														setEnabled(true);
+													}else{
+														throw new Exception("The card cannot be authenticated");
+													}
+												}else{
+													setEnabled(false);
+													throw new Exception("The card is not valid");
+												}
 											}else{
-												display.setText("The card cannot be authenticated");
-												throw new Exception("The card cannot be authenticated");
+												setEnabled(false);
+												throw new Exception("The card is not valid");												
 											}
 										}
 										
@@ -194,8 +212,10 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 
 										break;
 									} catch (Exception e) {
-										System.out.println("Card does not contain E-purse Applet!");
-										sleep(2000);
+										display.setText(e.getMessage());
+										sleep(1000);
+										display.setText("");
+										sleep(1000);
 										continue;
 									}
 								} catch (CardException e) {
@@ -204,6 +224,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 									continue;
 								}
 							} else {
+								setEnabled(false);
 								display.setText("Insert your Card!");
 								sleep(1000);
 								display.setText("");
@@ -216,11 +237,18 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 					}
 				}
 			} catch (Exception e) {
-				setEnabled(false);
 				display.setText("ERROR: " + e.getMessage());
 				e.printStackTrace();
 			}			
 		}
+	}
+	
+	public void setEnabled(boolean b) {
+		super.setEnabled(b);
+		debitButton.setEnabled(b);
+		creditButton.setEnabled(b);
+		clearButton.setEnabled(b);
+		balanceButton.setEnabled(b);
 	}
 
 	/**
@@ -281,38 +309,108 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	}
 	
 	/**
+	 * Check if the card is blocked
+	 * @throws Exception 
+	 */
+	int check_block() throws Exception{
+		byte[] data = new byte[16];
+		boolean flag = false;
+		
+		CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_BLOCK,(byte) 0,(byte) 0,data, BLOCKSIZE);
+		ResponseAPDU rapdu = applet.transmit(capdu);
+
+		if (rapdu.getSW() != 0x9000){
+			return 0;
+		}else{
+			
+			data = rapdu.getData();
+			
+			/** a network file that contains the IDs of blocked_cards*/
+			File file = new File("blocked_id.txt");
+			
+			Scanner scanner = new Scanner(file);
+			while (scanner.hasNextLine()) {
+				String lineFromFile = scanner.nextLine();
+				if(lineFromFile.contains(toHexString(data))) {
+					flag = true;
+					break;
+				}
+			}
+			
+			if (flag == false){
+				return 1;
+			}else{
+				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_BLOCK,(byte) 0,(byte) 0, BLOCKSIZE);
+				applet.transmit(capdu2);
+				return 0;
+			}
+		}
+	}
+	
+	/**
+	 * Check the expired date of the card
+	 * @throws Exception 
+	 */
+	int check_date() throws Exception{
+		Date date = new Date();
+        
+		Calendar cal = Calendar.getInstance();
+		cal.setTime(date);
+		short month = (short) cal.get(Calendar.MONTH);
+		short year = (short) cal.get(Calendar.YEAR);
+
+		month = (short) (month + (short) 1);
+		
+		byte[] bl_date = new byte[4];
+		
+		bl_date[0] = (byte)((year & 0xFF00) >> 8);
+		bl_date[1] = (byte)((year & 0x00FF) >> 0);
+		bl_date[2] = (byte)((month & 0xFF00) >> 8);
+		bl_date[3] = (byte)((month & 0x00FF) >> 0);
+		
+		CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_DATE,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
+		ResponseAPDU rapdu = applet.transmit(capdu);		
+		
+		if (rapdu.getSW() == 0x9000)
+			return 1;
+		else{
+			return 0;
+		}
+	}
+	
+	/**
 	 * Authentication between the terminal and the card
 	 * @throws Exception 
 	 */
 	int authenticate() throws Exception{
-		/** Generate nonce of terminal */
+		// Generate nonce of terminal
 		SecureRandom random = new SecureRandom();
-		byte nonce_t[] = new byte[16];
-		random.nextBytes(nonce_t);
-		//System.out.println("Nonce of terminal: " + toHexString(nonce_t));
+	    byte nonce_t[] = new byte[16];
+	    random.nextBytes(nonce_t);
+	    //System.out.println("Nonce of terminal: " + toHexString(nonce_t));
 	    
-	    	/** Send nonce to the card */
-	    	CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_NONCE,(byte) 0, (byte) 0,nonce_t,BLOCKSIZE);
+	    //send nonce to the card
+	    CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_NONCE,(byte) 0, (byte) 0,nonce_t,BLOCKSIZE);
 		ResponseAPDU rapdu = applet.transmit(capdu);
 		
-		/** Get the nonce and id of the card as one byte array */
+		//get the nonce and id of the card as one byte array
 		byte[] incoming = rapdu.getData();
 
-		/** Split the byte array */
-		byte nonce_c[] = Arrays.copyOf(incoming, 16);
-		//System.out.println("Nonce of the card: " + toHexString(nonce_c));
-
-		byte id_c[] = Arrays.copyOfRange(incoming, 16,32);
-		//System.out.println("Id of the card: " + toHexString(id_c));
-
-		/** Create the symmetric key of the card */
-		byte[] k_id = encrypt(id_c,key_m);
-		//System.out.println("The k_id of the card: " + toHexString(k_id));
-
-		SecretKey key_id = new SecretKeySpec(k_id, 0, k_id.length, "AES");
-
-		/** Create the session key */
-		byte[] nonce_combined = new byte[16];
+		//Split the byte array
+	    byte nonce_c[] = Arrays.copyOf(incoming, 16);
+	    //System.out.println("Nonce of the card: " + toHexString(nonce_c));
+	    
+	    byte id_c[] = Arrays.copyOfRange(incoming, 16,32);
+	    //System.out.println("Id of the card: " + toHexString(id_c));
+		
+	    //retrieve the symmetric key of the card
+	    byte[] k_id = encrypt(id_c,key_m);
+	    //System.out.println("The k_id of the card: " + toHexString(k_id));
+	    
+	    SecretKey key_id = new SecretKeySpec(k_id, 0, k_id.length, "AES");
+	    
+	    //Create the session key
+	    byte[] nonce_combined = new byte[16];
 	    
   		for (int i = 0; i < nonce_combined.length; i++) {
     		nonce_combined[i] = (byte) (((int) nonce_t[i]) ^ ((int) nonce_c[i]));
@@ -320,16 +418,16 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 
   		//System.out.println("Nonce combined: " + toHexString(nonce_combined));
 	    
-	    	byte[] sessionkey = encrypt(nonce_combined,key_id);
+	    byte[] sessionkey = encrypt(nonce_combined,key_id);
 	    
   		//System.out.println("The Session Key: " + toHexString(sessionkey));
 	    
-	    	key_session = new SecretKeySpec(sessionkey, 0, sessionkey.length, "AES");
+	    key_session = new SecretKeySpec(sessionkey, 0, sessionkey.length, "AES");
 	    
-		//encrypt the nonce of terminal with the session key and send it to the card
-		byte[] data = encrypt(nonce_t,key_session);
-
-		CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_SESSION,(byte) 0, (byte) 0,data,BLOCKSIZE);
+	    //encrypt the nonce of terminal with the session key and send it to the card
+	    byte[] data = encrypt(nonce_t,key_session);
+	    
+	    CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_SESSION,(byte) 0, (byte) 0,data,BLOCKSIZE);
 		ResponseAPDU rapdu2 = applet.transmit(capdu2);
 		
 		//if the card didn't authenticate the terminal, the communication stops.
@@ -371,11 +469,9 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_CREDIT,	(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
 			ResponseAPDU rapdu = applet.transmit(capdu);
 
-			/** Wrong balance or wrong amount message */
+			/**wrong balance or wrong amount message */
 			if (rapdu.getSW() == 0x84){
-				display.setText("You cannot credit your card. \nYour balance cannot be more than 100E");
-			} else if (rapdu.getSW() == 0x86){
-				display.setText("Your amount has to be between 0 and 100E");
+				display.setText("The transaction is not possible.\n");
 			}
 		}
 	}
@@ -396,12 +492,10 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			
 			CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_DEBIT,	(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
 			ResponseAPDU rapdu = applet.transmit(capdu);
-			
-			/** Negative balance message */
-			if (rapdu.getSW() == 0x85){
-				display.setText("You cannot do the purchase. \nThe amount is larger than your balance");
-			} else if (rapdu.getSW() == 0x86){
-				display.setText("Your amount has to be between 0 and 100E");
+						
+			/**negative balance message */
+			if (rapdu.getSW() == 0x84){
+				display.setText("The transaction is not possible.\n");
 			}
 		}
 	}
@@ -418,7 +512,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 
 		data = rapdu2.getData();
 
-	    	byte[] decrypted = decrypt(data,key_session);
+	    byte[] decrypted = decrypt(data,key_session);
 		
 		short value = java.nio.ByteBuffer.wrap(decrypted).getShort();
 		float valuefloat = (float) (value/100.0);
@@ -444,19 +538,19 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	}
 
 	public byte[] encrypt(byte[] data, SecretKey key) throws Exception {
-		ecipher = Cipher.getInstance("AES/ECB/NoPadding");
-		ecipher.init(Cipher.ENCRYPT_MODE, key);
+	    ecipher = Cipher.getInstance("AES/ECB/NoPadding");
+	    ecipher.init(Cipher.ENCRYPT_MODE, key);
 	
 		byte[] enc = ecipher.doFinal(data);
 		return(enc);
 	}
 	
-    	public byte[] decrypt(byte[] data, SecretKey key) throws Exception {
-		dcipher = Cipher.getInstance("AES/ECB/NoPadding");
-		dcipher.init(Cipher.DECRYPT_MODE, key);
+    public byte[] decrypt(byte[] data, SecretKey key) throws Exception {
+        dcipher = Cipher.getInstance("AES/ECB/NoPadding");
+        dcipher.init(Cipher.DECRYPT_MODE, key);
 
-		byte[] dec = dcipher.doFinal(data);
-		return(dec);
+	    byte[] dec = dcipher.doFinal(data);
+	    return(dec);
 	}
 	  
 
@@ -467,21 +561,21 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	 *            command line arguments.
 	 */
 	public static void main(String[] arg) {
-	    	//reads the AES key from the file "key" and assigns it to the variable secretkey 
-		File file = new File("key");
-		secretkey = new byte[(int) file.length()];
-		try {
-			FileInputStream fileInputStream = new FileInputStream(file);
-			try {
-				fileInputStream.read(secretkey);
-			}catch (IOException e) {
-				System.out.println("Error Reading The File.");
-				e.printStackTrace();
-			}	
+	    //reads the AES key from the file "key" and assigns it to the variable secretkey 
+	    File file = new File("key");
+	    secretkey = new byte[(int) file.length()];
+	    try {
+	       FileInputStream fileInputStream = new FileInputStream(file);
+	       try {
+			fileInputStream.read(secretkey);
+		   } catch (IOException e) {
+		        System.out.println("Error Reading The File.");
+	        	e.printStackTrace();
+		   }	
 		}catch (FileNotFoundException e) {
-			System.out.println("File Not Found.");
-			e.printStackTrace();
-		}
+          		System.out.println("File Not Found.");
+          		e.printStackTrace();
+        }
 		
 		key_m = new SecretKeySpec(secretkey, 0, secretkey.length, "AES");
         

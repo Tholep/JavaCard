@@ -1,4 +1,4 @@
-package terminal;
+package posterminal;
 
 import java.awt.*;
 import java.awt.event.*;
@@ -17,13 +17,15 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.security.*;
+import java.security.spec.X509EncodedKeySpec;
+
 import javax.smartcardio.*;
 
 
 /**
  * Sample terminal for the E-Purse applet.
  */
-public class EpurseTerminal extends JPanel implements ActionListener {
+public class PoSTerminal extends JPanel implements ActionListener {
 
 	static final int BLOCKSIZE = 256;
 	
@@ -34,8 +36,8 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	static final int AMOUNT_HEIGHT = 1;
     static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
-	static final String MSG_ERROR = "Aborted";
-	static final String MSG_APPROVED = "Approved";
+	static final String MSG_ERROR = "Aborted\nPlease remove your card";
+	static final String MSG_APPROVED = "Approved\nThank you!\nPlease remove your card";
     
 	static final byte[] APPLET_AID = { (byte) 0x3B, (byte) 0x29,(byte) 0x63, (byte) 0x61, (byte) 0x6C, (byte) 0x63, (byte) 0x01 };
 	static final CommandAPDU SELECT_APDU = new CommandAPDU((byte) 0x00, (byte) 0xA4, (byte) 0x04, (byte) 0x00, APPLET_AID);
@@ -49,23 +51,18 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	private static final byte INS_CHECK_BLOCK = (byte) 0x47;
 	private static final byte INS_BLOCK = (byte) 0x48;
 		
-	private static final byte INS_CREDIT = (byte)0x31;
-	private static final byte INS_CREDIT_OK = (byte)0x33;
+	private static final byte INS_DEBIT = (byte)0x32;
+	private static final byte INS_DEBIT_OK = (byte)0x34;
 
-	private static final byte INS_BALANCE = (byte) 0x35;
-	
 	/** Counter of decimal digits in the amount */
 	private int counter = 0;
 	
 	/** The position of the transaction */
 	private byte counter_trans = (byte) 0x00;
 	
-	/** Check if a credit action has been done */
-	private boolean flag_credit = false;
-	
 	private int terminal_counter;
 	
-	/** The master symmetric key of terminal */
+	/**The master symmetric key of terminal */
     private static byte[] secretkey = null ;
     static SecretKey key_m;
     
@@ -88,7 +85,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	/** GUI stuff. */
 	JTextArea display, amountfield;
 	JPanel keypad;
-	JButton creditButton,balanceButton,clearButton;
+	JButton debitButton,clearButton;
 
 	/** The card applet. */
 	CardChannel applet;
@@ -96,7 +93,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	/**
 	 * Constructs the terminal application.
 	 */
-	public EpurseTerminal(JFrame parent) {
+	public PoSTerminal(JFrame parent) {
 		readterminalinfo();
 		readkey();
 		buildGUI(parent);
@@ -120,7 +117,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		try {
 			Scanner scanner = new Scanner(file2);
 			t_counter = scanner.nextLine();
-			terminal_counter = (int) Integer.parseInt(t_counter);		
+			terminal_counter = (int) Integer.parseInt(t_counter);
 		} catch (FileNotFoundException e) {
       		System.out.println("File Not Found.");
 			e.printStackTrace();
@@ -128,7 +125,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	}
 	
 	void readkey(){
-	    /** Reads the AES key from the file "key" and assigns it to the byte array secretkey */ 
+	    /** Reads the AES key from the file "key" and assigns it to the variable secretkey */ 
 	    File file = new File("key");
 	    secretkey = new byte[(int) file.length()];
 	    try {
@@ -157,23 +154,22 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		display.setEditable(false);
 		add(new JScrollPane(display), BorderLayout.SOUTH);
 		
-		creditButton = new JButton("Credit");
-		balanceButton = new JButton("Balance");
+		debitButton = new JButton("Pay");
 		clearButton = new JButton("Clear");
 		
 		keypad = new JPanel(new GridLayout(4, 4));
 		key("1");
 		key("2");
 		key("3");
-		keypad.add(creditButton);
+		keypad.add(debitButton);
 		key("4");
 		key("5");
 		key("6");
-		keypad.add(balanceButton);
+		keypad.add(clearButton);
 		key("7");
 		key("8");
 		key("9");
-		keypad.add(clearButton);
+		key(null);
 		key(null);
 		key("0");
 		key(".");
@@ -210,9 +206,8 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	 *            the action listener to add.
 	 */
 	public void addActionListener(ActionListener l) {
-		creditButton.addActionListener(l);
-		balanceButton.addActionListener(l);
 		clearButton.addActionListener(l);
+		debitButton.addActionListener(l);
 	}
 
 	class CardThread extends Thread {
@@ -247,7 +242,6 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 													if (authenticate() == 1){
 														display.setText("Authenticated");
 														setEnabled(true);
-														flag_credit = false;
 													}else{
 														throw new Exception("The card cannot be authenticated");
 													}
@@ -300,9 +294,8 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	
 	public void setEnabled(boolean b) {
 		super.setEnabled(b);
-		creditButton.setEnabled(b);
+		debitButton.setEnabled(b);
 		clearButton.setEnabled(b);
-		balanceButton.setEnabled(b);
 	}
 
 	/**
@@ -317,27 +310,15 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			if (src instanceof JButton) {
 				JButton button = (JButton) src;
 				
-				if (button.equals(creditButton)){
-					if (flag_credit == false){
-						String amount = amountfield.getText();
-						amountfield.setText("0");
-						credit(amount);
-						counter = 0;
-						counter_trans = (byte) 0;
-					}
-					if (flag_credit == true){
-						creditButton.setEnabled(false);
-						display.append("\n\nPlease remove your card\nOr check your balance");
-					}
-				} else if (button.equals(balanceButton)){
-					display.setText(" ");
-					balance();
+				if (button.equals(debitButton)){
+					String amount = amountfield.getText();
+					amountfield.setText("0");
+					debit(amount);
+					counter = 0;
+					setEnabled(false);
 				} else if (button.equals(clearButton)){
 					amountfield.setText("0");
-					if (flag_credit == true)
-						creditButton.setEnabled(false);
-					else
-						creditButton.setEnabled(true);
+					debitButton.setEnabled(true);
 					display.setText("");
 					counter = 0;
 				} else{
@@ -363,7 +344,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 				}
 			}
 		} catch (Exception e) {
-			System.out.println("ERROR: " + e.getMessage());
+			System.out.println(MSG_ERROR);
 		}
 	}
 	
@@ -391,7 +372,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			Scanner scanner = new Scanner(file);
 			while (scanner.hasNextLine()) {
 				String lineFromFile = scanner.nextLine();
-				
+
 				/** Compares the id of the card with the contents of the file */
 				if(lineFromFile.contains(toHexString(data))) {
 					flag = true;
@@ -465,11 +446,11 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		byte[] incoming = rapdu.getData();
 
 		/** Splits the byte array to nonce of the card and id of the card*/
-	    byte nonce_c[] = Arrays.copyOf(incoming, 16);
+	    byte nonce_c[] = Arrays.copyOf(incoming, 16);   
 	    id_c = Arrays.copyOfRange(incoming, 16,32);
 		
 	    /** Retrieves the symmetric key of the card */
-	    byte[] k_id = encrypt(id_c,key_m);
+	    byte[] k_id = encrypt(id_c,key_m);	    
 	    SecretKey key_id = new SecretKeySpec(k_id, 0, k_id.length, "AES");
 	    
 	    /** XOR of nonces */
@@ -497,7 +478,6 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			/** Gets the nonce of terminal encrypted with the session key */
 			byte[] encrypted = rapdu2.getData();
 			byte[] data_2 = decrypt(encrypted,key_session);
-	  		//System.out.println("The Nonce : " + toHexString(data_2));
 
 			/** If the data_2 and the nonce_t are same, then the authentication has been established. */
 			if (Arrays.equals(nonce_t,data_2) == true)
@@ -509,10 +489,10 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	}
 	
 	/**
-	 * Handles 'credit' button event.
+	 * Handles 'debit' button event.
 	 * @throws Exception 
 	 */
-	void credit(String amount) throws Exception {
+	void debit(String amount) throws Exception {
 		/** Converts the string amount to integer
 		 * 	Multiples the amount with 100 
 		 * 	for the case of decimals in amount
@@ -523,17 +503,15 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		if (check_amount(amountint) == 1){
 			display.setText("Your amount has to be between 0 and 100\u20ac");
 		}else{
-			flag_credit = true;
 			/** Creates the byte array data with the data to be hashed 
 			 * data[0] = The instruction			 (1 Byte )
 			 * data[1] = The amount of transaction	 (2 Bytes)
-			 * data[3] = The step of the process	 (1 Byte )
-			 * 														//add the counter_credit
+			 * data[3] = The counter of this session (1 Byte )
 			 * data[4] = The terminal id			 (2 Bytes)
 			 * data[6] = The terminal counter		 (2 Bytes)
 			 */
 			byte[] data = new byte[8];
-			data[0] = INS_CREDIT;
+			data[0] = INS_DEBIT;
 			data[1] = (byte) ((amountint & 0xFF00) >> 8);
 			data[2] = (byte) ((amountint & 0x00FF) >> 0);
 			data[3] = counter_trans;
@@ -542,7 +520,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			
 			data[4] = (byte) ((terminal_id &0xFF00) >> 8);
 			data[5] = (byte) ((terminal_id &0x00FF) >> 0);
-
+			
 			data[6] = (byte) ((terminal_counter &0xFF00) >> 8);
 			data[7] = (byte) ((terminal_counter &0x00FF) >> 0);
 
@@ -557,24 +535,25 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			/** Creates the final byte array which will be encrypted = data + hash(data) */
 			byte[] toencrypt = new byte[32];
 			System.arraycopy(data,0,toencrypt,0,data.length);
-			System.arraycopy(hashed,0,toencrypt,data.length,hashed.length);
+			System.arraycopy(hashed,0,toencrypt,data.length,hashed.length);			
 			
 			/** Encrypts the toencrypt byte array */
 			byte[] encrypted = encrypt(toencrypt,key_session);
-
-			/** Sends the encrypted data to the card with INS_CREDIT instruction */
-			CommandAPDU capdu = new CommandAPDU(CLA_WALLET,INS_CREDIT,(byte) 0,(byte) 0,encrypted,BLOCKSIZE);
+			
+			/** Sends the encrypted data to the card with INS_DEBIT instruction */
+			CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_DEBIT,	(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
 			ResponseAPDU rapdu = applet.transmit(capdu);
-		
+			
+
 			if (rapdu.getSW() != 0x9000){
-				/** Error message for maximum balance */
+				/** Error message for insufficient balance */
 				display.setText(MSG_ERROR);
 			}else{
 				/** Call the logs function and writes to the log file */
-				logs(INS_CREDIT,rapdu,md,amount);
+				logs(INS_DEBIT,rapdu,md,amount);
 			}
 			
-			/** Increases the terminal counter */
+			/** Increase the terminal counter */
 			terminal_counter++;
 			t_counter = Integer.toString(terminal_counter);
 			File file2 = new File("terminal_counter.txt");
@@ -610,7 +589,7 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		
 		/** the counter */
 		data2[1] = decrypted[1];
-				
+		
 		/** Gets the signed data sent by the card */
 		byte[] signedvalue = new byte[128];
 		System.arraycopy(decrypted,2,data2,2,128);
@@ -637,11 +616,9 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 		/** 
 		 * 
 		 *  If the hash values match then
-		 *  	terminal stores the data to the log file and the value 1,
-		 *  	which means that everything did properly
+		 *  	store the data to the log file and the value 1, which means that everything did properly
 		 *  else
-		 *  	terminal stores the data to the log file and the value 0,
-		 *  	which means that something went wrong   
+		 *  	store the data to the log file and the value 0, which means that something went wrong   
 		 * 
 		 */
 		
@@ -655,37 +632,11 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 			display.setText(MSG_APPROVED);
 		}
 		else{
-			bw.write(t_counter + " | " + t_id + " | " + toHexString(id_c) + "| 0x" + Integer.toHexString(command) + " | " + amount + " | " + toHexString(signedvalue) + "| " + "0");
+			bw.write(t_counter + " | " + t_id + " | " + toHexString(id_c) + "| " + Integer.toHexString(command) + " | " + amount + " | " + toHexString(signedvalue) + "| " + "0");
 			bw.newLine();
 			bw.close();
 			display.setText(MSG_ERROR);
 		}
-	}
-
-	/**
-	 * Handles 'amount' button event.
-	 */
-	void balance() throws Exception {
-		/** Sends some encrypted data to the card */
-		byte[] data = new byte[16];
-		byte[] encrypted = encrypt(data,key_session);
-
-		CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_BALANCE,(byte) 0, (byte) 0,encrypted,BLOCKSIZE);
-		ResponseAPDU rapdu2 = applet.transmit(capdu2);
-
-		/** Receives encrypted data from the card
-		 *  Decrypts them and divides them with 100.0
-		 *  in order to get the balance
-		 */
-		data = rapdu2.getData();
-
-	    byte[] decrypted = decrypt(data,key_session);
-		
-		short value = java.nio.ByteBuffer.wrap(decrypted).getShort();
-		float valuefloat = (float) (value/100.0);
-
-		amountfield.setText(String.valueOf(valuefloat));
-		creditButton.setEnabled(false);
 	}
 
 	static String toHexString(byte[] in) {
@@ -721,19 +672,19 @@ public class EpurseTerminal extends JPanel implements ActionListener {
 	    byte[] dec = dcipher.doFinal(data);
 	    return(dec);
 	}
-
+  
 	/**
 	 * Creates an instance of this class and puts it inside a frame.
 	 * 
 	 * @param arg
 	 *            command line arguments.
 	 */
-	public static void main(String[] arg) {
+	public static void main(String[] arg) {        
 		JFrame frame = new JFrame(TITLE);
 		frame.setSize(new Dimension(300,300));
 		frame.setResizable(false);
 		Container c = frame.getContentPane();
-		EpurseTerminal panel = new EpurseTerminal(frame);
+		PoSTerminal panel = new PoSTerminal(frame);
 		c.add(panel);
 		frame.addWindowListener(new CloseEventListener());
 		frame.pack();

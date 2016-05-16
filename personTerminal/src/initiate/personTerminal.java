@@ -3,6 +3,7 @@ package initiate;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
+import java.math.BigInteger;
 
 import java.util.List;
 import javax.swing.*;
@@ -12,10 +13,13 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
-//import java.security.*;
+import java.security.*;
 //import java.security.spec.*;
 //import java.security.interfaces.*;s
 import java.security.SecureRandom;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
 
 import javax.smartcardio.*;
 
@@ -37,27 +41,22 @@ public class personTerminal extends JPanel implements ActionListener {
 	static final int AMOUNT_HEIGHT = 1;
     static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
-
-	static final String MSG_ERROR = "Error";
-	static final String MSG_INVALID = "Invalid";
-
-	static final byte[] APPLET_AID = { (byte) 0x3B, (byte) 0x29,
-        (byte) 0x63, (byte) 0x61, (byte) 0x6C, (byte) 0x63, (byte) 0x01 };
+	static final byte[] APPLET_AID = {(byte) 0x3B,(byte) 0x29,(byte) 0x63,(byte) 0x61,(byte) 0x6C,(byte) 0x63,(byte) 0x01};
 
 
-	static final CommandAPDU SELECT_APDU = new CommandAPDU((byte) 0x00,
-			(byte) 0xA4, (byte) 0x04, (byte) 0x00, APPLET_AID);
+	static final CommandAPDU SELECT_APDU = new CommandAPDU((byte) 0x00,(byte) 0xA4,(byte) 0x04,(byte) 0x00,APPLET_AID);
 
 	private static final byte CLA_WALLET = (byte) 0xCC;
 	private static final byte INS_ISSUE = (byte) 0x40;
 	private static final byte INS_KEY = (byte) 0x41;
 	private static final byte INS_ID = (byte) 0x42;
 	private static final byte INS_BLDT = (byte) 0x43;
+	private static final byte INS_MODULUS = (byte) 0x44;
+	private static final byte INS_EXP = (byte) 0x45;
 
     private static byte[] masterkey = null ;
     
 	Cipher ecipher;
-	Cipher dcipher;
 
 	/** GUI stuff. */
 	JTextArea display;
@@ -113,9 +112,12 @@ public class personTerminal extends JPanel implements ActionListener {
 				TerminalFactory tf = TerminalFactory.getDefault();
 				CardTerminals ct = tf.terminals();
 				List<CardTerminal> cs = ct.list(CardTerminals.State.CARD_PRESENT);
-				if (cs.isEmpty()) {
-					display.setText("No terminals with a card found.");
-					return;
+				while (cs.isEmpty()) {
+					display.setText("Insert a Card!");
+					sleep(1000);
+					display.setText("");
+					sleep(1000);
+					cs = ct.list(CardTerminals.State.CARD_PRESENT);
 				}
 
 				while (true) {
@@ -124,7 +126,6 @@ public class personTerminal extends JPanel implements ActionListener {
 							if (c.isCardPresent()) {
 								try {
 									Card card = c.connect("*");
-									//System.out.println("Card: " + card);
 									try {
 										applet = card.getBasicChannel();
 										ResponseAPDU resp = applet.transmit(SELECT_APDU);
@@ -132,7 +133,7 @@ public class personTerminal extends JPanel implements ActionListener {
 											throw new Exception("Select failed");
 										}
 																			
-										// Wait for the card to be removed
+										/** Wait for the card to be removed */
 										while (c.isCardPresent())
 											;
 
@@ -148,7 +149,7 @@ public class personTerminal extends JPanel implements ActionListener {
 									continue;
 								}
 							} else {
-								display.setText("Insert your Card!");
+								display.setText("Insert a Card!");
 								sleep(1000);
 								display.setText("");
 								sleep(1000);
@@ -199,6 +200,7 @@ public class personTerminal extends JPanel implements ActionListener {
 				display.append("The card has been already issued\n");
 				issueButton.setEnabled(false);
 			} else{
+				/** Reads the master key from the file */
 			    File file = new File("key");
 			    masterkey = new byte[(int) file.length()];
 			    try {
@@ -214,12 +216,12 @@ public class personTerminal extends JPanel implements ActionListener {
 		          		e.printStackTrace();
 		        }
 	        
-				// Generate ID of the card//
+				/** Generates the ID of the card **/
 				SecureRandom random = new SecureRandom();
 			    byte ID[] = new byte[16];
 			    random.nextBytes(ID);
-			    //System.out.println("Card id: " + toHexString(ID));
-			    
+
+			    /** Saves the ID of the card to a file with all the IDs */
 				File file1 = new File("cards_id.txt");
 
 				if (!file1.exists()) {
@@ -231,24 +233,46 @@ public class personTerminal extends JPanel implements ActionListener {
 				bw.write(toHexString(ID));
 				bw.newLine();
 				bw.close();
-			    
-			    //create the key of the card
+
+			    /** Creates the key of the card  {ID}k_m */
 			    SecretKey key_m = new SecretKeySpec(masterkey, 0, masterkey.length, "AES");
 			    byte[] key_ID = encrypt(ID,key_m);			    
 			    
-			    //System.out.println("Card key: " + toHexString(key_ID));
-			    
-			    //System.out.println("Master key: " + toHexString(masterkey));
-			    
-			    //sends the key to the card
+			    /** Sends the key to the card */
 				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_KEY,(byte) 0,(byte) 0,key_ID, BLOCKSIZE);
 				applet.transmit(capdu2);
 				
-				//sends the id to the card
+				/** Sends the id to the card */
 				CommandAPDU capdu3 = new CommandAPDU(CLA_WALLET, INS_ID,(byte) 0,(byte) 0,ID, BLOCKSIZE);
 				applet.transmit(capdu3);
 				
-				/** Create the blocking date of the card */
+				/**Generates the sign key pair */
+				KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+				generator.initialize(1024);
+				KeyPair keypair = generator.generateKeyPair();
+				RSAPublicKey publickey = (RSAPublicKey)keypair.getPublic();
+				RSAPrivateKey privatekey = (RSAPrivateKey)keypair.getPrivate();
+				
+				PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(privatekey.getEncoded());
+				KeyFactory factory = KeyFactory.getInstance("RSA");
+				RSAPrivateKey key = (RSAPrivateKey) factory.generatePrivate(spec);
+				
+				/** Sends the key modulus to the card */
+				byte[] modulus = getBytes(key.getModulus());
+				CommandAPDU capdu4 = new CommandAPDU(CLA_WALLET, INS_MODULUS, (byte) 0,(byte) 0, modulus);
+				applet.transmit(capdu4);
+
+				/** Sends the key exponent to the card */
+				byte[] exponent = getBytes(key.getPrivateExponent());
+				CommandAPDU capdu5 = new CommandAPDU(CLA_WALLET, INS_EXP, (byte) 0,(byte) 0, exponent);
+				applet.transmit(capdu5);
+				
+				/** Saves the publickey to a file */
+				FileOutputStream file2 = new FileOutputStream("Cards/"+toHexString(ID));
+				file2.write(publickey.getEncoded());
+				file2.close();		
+				 
+				/** Creates the blocking date of the card */
 				Date date = new Date();
 		        
 				Calendar cal = Calendar.getInstance();
@@ -265,8 +289,9 @@ public class personTerminal extends JPanel implements ActionListener {
 				bl_date[2] = (byte)((month & 0xFF00) >> 8);
 				bl_date[3] = (byte)((month & 0x00FF) >> 0);
 				
-				CommandAPDU capdu4 = new CommandAPDU(CLA_WALLET, INS_BLDT,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
-				applet.transmit(capdu4);
+				/** Sends the blocking date to the card */
+				CommandAPDU capdu6 = new CommandAPDU(CLA_WALLET, INS_BLDT,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
+				applet.transmit(capdu6);
 				
 				display.append("The card is issued\n");
 				issueButton.setEnabled(false);
@@ -275,8 +300,17 @@ public class personTerminal extends JPanel implements ActionListener {
 			throw new CardException(e.getMessage());
 		}
 	}
-
 	
+	byte[] getBytes(BigInteger big) {
+		byte[] data = big.toByteArray();
+		if (data[0] == 0) {
+			byte[] tmp = data;
+			data = new byte[tmp.length - 1];
+			System.arraycopy(tmp, 1, data, 0, tmp.length - 1);
+		}
+		return data;
+	}
+
 	static String toHexString(byte[] in) {
 		StringBuilder out = new StringBuilder(2*in.length);
 		for(int i = 0; i < in.length; i++) {
@@ -298,9 +332,8 @@ public class personTerminal extends JPanel implements ActionListener {
 	 * 
 	 * @param arg
 	 *            command line arguments.
-	 * @throws IOException 
 	 */
-	public static void main(String[] arg) throws IOException {
+	public static void main(String[] arg){
 		JFrame frame = new JFrame(TITLE);
 		frame.setSize(new Dimension(300,300));
 		frame.setResizable(false);

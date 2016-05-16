@@ -8,12 +8,13 @@
 
 ## personTerminal
 
- Personalizes the card.  
- Reads the master_key from the "key" file.  
- Generates a 16byte ID  and saves every ID generated to the "cards_id.txt" file.  
- Encrypts it with the master_key to generate the key_id of the card.  
- Creates a signature pair. The terminal sends the private key to the card and stores the publickey to the folder Cards and uses the ID of the card as the filename.  
- Also, the personTerminal sends to the card the expired date (2 months and 3 years after from the current date).  
+Personalizes the card.  
+Reads the master_key from the "key" file.  
+Generates a 16byte ID  and saves every ID generated to the "cards_id.txt" file.  
+Encrypts it with the master_key to generate the key_id of the card.  
+Creates a signature pair. The terminal sends the private key to the card and stores the publickey to the folder Cards and uses the ID of the card as the filename.  
+Also, the personTerminal sends to the card the expired date (2 months and 3 years after from the current date).  
+
 ====================================================================================================================================================================
 
 ## EpurseTerminal (reloadTerminal)
@@ -45,12 +46,14 @@ In balance process:
 &nbsp;&nbsp;The terminal asks from the card to return the balance.  
 &nbsp;&nbsp;The card sends the balance encrypted.  
 &nbsp;&nbsp;The terminal decrypts it and displays it to the amountfield of the GUI.  
+
 ====================================================================================================================================================================
 
 ## PoSTerminal (debitTerminal)
 
 The same procedure as the EpurseTerminal, except of balance procedure.  
 Error message for insufficient balance: The terminal increases the terminal_counter and does not save any information to the logs.  
+
 ====================================================================================================================================================================
 
 ## EpurseApplet

@@ -144,12 +144,12 @@ public class EpurseApplet extends Applet implements ISO7816
 	   				case INS_MODULUS:
 	   					lc = (short)(buf[OFFSET_LC] & 0x00FF);
 	   					readBuffer(apdu,tmp,(short)0,lc);
-		                privatekey.setModulus(tmp,(short)0,lc);
+		                		privatekey.setModulus(tmp,(short)0,lc);
 	   					break;
 	   				case INS_EXP:
 	   					lc = (short)(buf[OFFSET_LC] & 0x00FF);
-		                readBuffer(apdu,tmp,(short)0,lc);
-		                privatekey.setExponent(tmp,(short)0,lc);
+						readBuffer(apdu,tmp,(short)0,lc);
+						privatekey.setExponent(tmp,(short)0,lc);
 	   					break;
 	   				case INS_BLDT:
 	   					short lc2 = (short)(buf[OFFSET_LC] & 0x00FF);
@@ -370,7 +370,7 @@ public class EpurseApplet extends Applet implements ISO7816
 		   short outLength = cipher.doFinal(tmp,(short)0,(short) 160,buffer,(short)0);
 		   
 		   /** Protects the card by card tears */
-		   //beginTransaction();
+		   JCSystem.beginTransaction();
 		   
 		   /** Increases the balance */
 		   balance = (short) (balance + amount);
@@ -380,16 +380,8 @@ public class EpurseApplet extends Applet implements ISO7816
 		   apdu.setOutgoingLength(outLength);
 		   apdu.sendBytes((short)0,outLength);
 		   
-		   //abortTransaction();
+		   JCSystem.commitTransaction();
 	   }
-   }
-   
-   private void abortTransaction() {
-	   // TODO Auto-generated method stub
-   }
-
-   private void beginTransaction() {
-	   //TODO Auto-generated method stub	
    }
 
    private void debit(APDU apdu){
@@ -463,7 +455,7 @@ public class EpurseApplet extends Applet implements ISO7816
 		   short outLength = cipher.doFinal(tmp,(short)0,(short) 160,buffer,(short)0);
 		   
 		   /** Protectes the card by card tears */
-		   //beginTransaction();
+		   JCSystem.beginTransaction();
 		   
 		   /** Increases the balance */
 		   balance = (short) (balance - amount);
@@ -473,7 +465,7 @@ public class EpurseApplet extends Applet implements ISO7816
 		   apdu.setOutgoingLength(outLength);
 		   apdu.sendBytes((short)0,outLength);
 		   
-		   //abortTransaction();
+		   JCSystem.abortTransaction();
 	   }
    }
    

@@ -9,13 +9,10 @@ import java.util.List;
 import javax.swing.*;
 
 import javax.crypto.Cipher;
-//import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.security.*;
-//import java.security.spec.*;
-//import java.security.interfaces.*;s
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
@@ -39,7 +36,7 @@ public class personTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+    	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 	static final byte[] APPLET_AID = {(byte) 0x3B,(byte) 0x29,(byte) 0x63,(byte) 0x61,(byte) 0x6C,(byte) 0x63,(byte) 0x01};
 
@@ -47,17 +44,22 @@ public class personTerminal extends JPanel implements ActionListener {
 	static final CommandAPDU SELECT_APDU = new CommandAPDU((byte) 0x00,(byte) 0xA4,(byte) 0x04,(byte) 0x00,APPLET_AID);
 
 	private static final byte CLA_WALLET = (byte) 0xCC;
-	private static final byte INS_ISSUE = (byte) 0x40;
+	
+	private static final byte INS_CHECK_ISSUE = (byte) 0x40;
+	
 	private static final byte INS_KEY = (byte) 0x41;
 	private static final byte INS_ID = (byte) 0x42;
 	private static final byte INS_BLDT = (byte) 0x43;
 	private static final byte INS_MODULUS = (byte) 0x44;
 	private static final byte INS_EXP = (byte) 0x45;
 
-    private static byte[] masterkey = null ;
+    	private static byte[] masterkey = null ;
     
 	Cipher ecipher;
 
+	CommandAPDU capdu;
+	ResponseAPDU rapdu;
+	
 	/** GUI stuff. */
 	JTextArea display;
 	JPanel button;
@@ -88,12 +90,12 @@ public class personTerminal extends JPanel implements ActionListener {
 		add(new JScrollPane(display), BorderLayout.NORTH);
 		
 		issueButton = new JButton("Issue");
-        button = new JPanel(new FlowLayout());
+		button = new JPanel(new FlowLayout());
 		button.add(issueButton);
 
-	    add(button, BorderLayout.SOUTH);
+		add(button, BorderLayout.SOUTH);
 		
-	    parent.addWindowListener(new CloseEventListener());		
+		parent.addWindowListener(new CloseEventListener());		
 	}
     
 	/**
@@ -194,9 +196,12 @@ public class personTerminal extends JPanel implements ActionListener {
 	
 	void issue() throws CardException {
 		try {
-			CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_ISSUE,(byte) 0, (byte) 0);
-			ResponseAPDU rapdu = applet.transmit(capdu);
-			if (rapdu.getSW() != 0x9000) {
+			capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_ISSUE,(byte) 0, (byte) 0,BLOCKSIZE);
+			rapdu = applet.transmit(capdu);
+			
+			byte[] result = rapdu.getData();
+
+			if (result[1] == 1){
 				display.append("The card has been already issued\n");
 				issueButton.setEnabled(false);
 			} else{
@@ -218,10 +223,10 @@ public class personTerminal extends JPanel implements ActionListener {
 	        
 				/** Generates the ID of the card **/
 				SecureRandom random = new SecureRandom();
-			    byte ID[] = new byte[16];
-			    random.nextBytes(ID);
+				byte ID[] = new byte[16];
+				random.nextBytes(ID);
 
-			    /** Saves the ID of the card to a file with all the IDs */
+				/** Saves the ID of the card to a file with all the IDs */
 				File file1 = new File("cards_id.txt");
 
 				if (!file1.exists()) {
@@ -234,17 +239,17 @@ public class personTerminal extends JPanel implements ActionListener {
 				bw.newLine();
 				bw.close();
 
-			    /** Creates the key of the card  {ID}k_m */
-			    SecretKey key_m = new SecretKeySpec(masterkey, 0, masterkey.length, "AES");
-			    byte[] key_ID = encrypt(ID,key_m);			    
+				/** Creates the key of the card  {ID}k_m */
+				SecretKey key_m = new SecretKeySpec(masterkey, 0, masterkey.length, "AES");
+				byte[] key_ID = encrypt(ID,key_m);			    
 			    
-			    /** Sends the key to the card */
-				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_KEY,(byte) 0,(byte) 0,key_ID, BLOCKSIZE);
-				applet.transmit(capdu2);
+				/** Sends the key to the card */
+				capdu = new CommandAPDU(CLA_WALLET, INS_KEY,(byte) 0,(byte) 0,key_ID, BLOCKSIZE);
+				applet.transmit(capdu);
 				
 				/** Sends the id to the card */
-				CommandAPDU capdu3 = new CommandAPDU(CLA_WALLET, INS_ID,(byte) 0,(byte) 0,ID, BLOCKSIZE);
-				applet.transmit(capdu3);
+				capdu = new CommandAPDU(CLA_WALLET, INS_ID,(byte) 0,(byte) 0,ID, BLOCKSIZE);
+				applet.transmit(capdu);
 				
 				/**Generates the sign key pair */
 				KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
@@ -259,13 +264,13 @@ public class personTerminal extends JPanel implements ActionListener {
 				
 				/** Sends the key modulus to the card */
 				byte[] modulus = getBytes(key.getModulus());
-				CommandAPDU capdu4 = new CommandAPDU(CLA_WALLET, INS_MODULUS, (byte) 0,(byte) 0, modulus);
-				applet.transmit(capdu4);
+				capdu = new CommandAPDU(CLA_WALLET, INS_MODULUS, (byte) 0,(byte) 0, modulus);
+				applet.transmit(capdu);
 
 				/** Sends the key exponent to the card */
 				byte[] exponent = getBytes(key.getPrivateExponent());
-				CommandAPDU capdu5 = new CommandAPDU(CLA_WALLET, INS_EXP, (byte) 0,(byte) 0, exponent);
-				applet.transmit(capdu5);
+				capdu = new CommandAPDU(CLA_WALLET, INS_EXP, (byte) 0,(byte) 0, exponent);
+				applet.transmit(capdu);
 				
 				/** Saves the publickey to a file */
 				FileOutputStream file2 = new FileOutputStream("Cards/"+toHexString(ID));
@@ -290,8 +295,8 @@ public class personTerminal extends JPanel implements ActionListener {
 				bl_date[3] = (byte)((month & 0x00FF) >> 0);
 				
 				/** Sends the blocking date to the card */
-				CommandAPDU capdu6 = new CommandAPDU(CLA_WALLET, INS_BLDT,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
-				applet.transmit(capdu6);
+				capdu = new CommandAPDU(CLA_WALLET, INS_BLDT,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
+				applet.transmit(capdu);
 				
 				display.append("The card is issued\n");
 				issueButton.setEnabled(false);
@@ -320,8 +325,8 @@ public class personTerminal extends JPanel implements ActionListener {
 	}
   
 	public byte[] encrypt(byte[] data, SecretKey key) throws Exception {
-	    ecipher = Cipher.getInstance("AES/ECB/NoPadding");
-	    ecipher.init(Cipher.ENCRYPT_MODE, key);
+		ecipher = Cipher.getInstance("AES/ECB/NoPadding");
+		ecipher.init(Cipher.ENCRYPT_MODE, key);
 	
 		byte[] enc = ecipher.doFinal(data);
 		return(enc);

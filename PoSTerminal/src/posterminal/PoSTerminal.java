@@ -17,8 +17,6 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.security.*;
-import java.security.spec.X509EncodedKeySpec;
-
 import javax.smartcardio.*;
 
 
@@ -34,7 +32,7 @@ public class PoSTerminal extends JPanel implements ActionListener {
 	static final int DISPLAY_HEIGHT = 15;
 	static final int AMOUNT_WIDTH = 30;
 	static final int AMOUNT_HEIGHT = 1;
-    static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
+	static final Font FONT = new Font("Monospaced", Font.BOLD, 24);
 
 	static final String MSG_ERROR = "Aborted\nPlease remove your card";
 	static final String MSG_APPROVED = "Approved\nThank you!\nPlease remove your card";
@@ -44,12 +42,13 @@ public class PoSTerminal extends JPanel implements ActionListener {
 	
 	private static final byte CLA_WALLET = (byte) 0xCC;
 	
-	private static final byte INS_NONCE = (byte) 0x44;
-	private static final byte INS_SESSION = (byte) 0x45;
-	
-	private static final byte INS_CHECK_DATE = (byte) 0x46;
-	private static final byte INS_CHECK_BLOCK = (byte) 0x47;
-	private static final byte INS_BLOCK = (byte) 0x48;
+	private static final byte INS_CHECK_ISSUE = (byte) 0x40;
+
+	private static final byte INS_NONCE = (byte)0x51;
+	private static final byte INS_SESSION = (byte)0x52;
+   
+	private static final byte INS_CHECK_DATE = (byte) 0x53;
+	private static final byte INS_BLOCK = (byte) 0x55;
 		
 	private static final byte INS_DEBIT = (byte)0x32;
 	private static final byte INS_DEBIT_OK = (byte)0x34;
@@ -63,25 +62,28 @@ public class PoSTerminal extends JPanel implements ActionListener {
 	private int terminal_counter;
 	
 	/**The master symmetric key of terminal */
-    private static byte[] secretkey = null ;
-    static SecretKey key_m;
-    
-    /** The id of the card */
-    byte[] id_c = new byte[16];
-    
-    /** The session key established during authentication*/
-    static SecretKey key_session;
-    
-    /** Terminal Information */
-    String t_id;
-    String t_counter;
-    
-    /** Cipher for encyrption */
+	private static byte[] secretkey = null ;
+	static SecretKey key_m;
+
+	/** The id of the card */
+	byte[] id_c = new byte[16];
+
+	/** The session key established during authentication*/
+	static SecretKey key_session;
+
+	/** Terminal Information */
+	String t_id;
+	String t_counter;
+
+	/** Cipher for encyrption */
 	Cipher ecipher;
 	
 	/** Cipher for decryption */
 	Cipher dcipher;
 
+	CommandAPDU capdu;
+	ResponseAPDU rapdu;
+	
 	/** GUI stuff. */
 	JTextArea display, amountfield;
 	JPanel keypad;
@@ -110,7 +112,7 @@ public class PoSTerminal extends JPanel implements ActionListener {
 			Scanner scanner = new Scanner(file);
 			t_id = scanner.nextLine();
 		} catch (FileNotFoundException e) {
-      		System.out.println("File Not Found.");
+			System.out.println("File Not Found.");
 			e.printStackTrace();
 		}
 		
@@ -119,7 +121,7 @@ public class PoSTerminal extends JPanel implements ActionListener {
 			t_counter = scanner.nextLine();
 			terminal_counter = (int) Integer.parseInt(t_counter);
 		} catch (FileNotFoundException e) {
-      		System.out.println("File Not Found.");
+			System.out.println("File Not Found.");
 			e.printStackTrace();
 		}
 	}
@@ -237,20 +239,18 @@ public class PoSTerminal extends JPanel implements ActionListener {
 											throw new Exception("Select failed");
 										}
 										else{
-											if (check_block() == 1){
-												if (check_date() == 1){
-													if (authenticate() == 1){
+											if (authenticate() == 1){
+												if (check_block() == 1){
+													if (check_date() == 1){
 														display.setText("Authenticated");
 														setEnabled(true);
 													}else{
-														throw new Exception("The card cannot be authenticated");
+														throw new Exception("The card is not valid");
 													}
 												}else{
-													setEnabled(false);
 													throw new Exception("The card is not valid");
 												}
 											}else{
-												setEnabled(false);
 												throw new Exception("The card is not valid");												
 											}
 										}
@@ -353,46 +353,34 @@ public class PoSTerminal extends JPanel implements ActionListener {
 	 * @throws Exception 
 	 */
 	int check_block() throws Exception{
-		byte[] data = new byte[16];
 		boolean flag = false;
+			
+		/** A network file that contains the IDs of blocked_cards*/
+		File file = new File("blocked_id.txt");
 		
-		CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_BLOCK,(byte) 0,(byte) 0,data, BLOCKSIZE);
-		ResponseAPDU rapdu = applet.transmit(capdu);
+		Scanner scanner = new Scanner(file);
+		while (scanner.hasNextLine()) {
+			String lineFromFile = scanner.nextLine();
 
-		if (rapdu.getSW() != 0x9000){
-			return 0;
+			/** Compares the id of the card with the contents of the file */
+			if(lineFromFile.contains(toHexString(id_c))) {
+				flag = true;
+				break;
+			}
+		}
+		
+		/** If the ID of the card is not in the block_id file then
+		 *  	the application continues normally
+		 *  else
+		 *  	the terminal sends the INS_BLOCK instruction to the card
+		 *  	and blocks the card
+		 */
+		if (flag == false){
+			return 1;
 		}else{
-			
-			/** Returns the id of the card */
-			data = rapdu.getData();
-			
-			/** A network file that contains the IDs of blocked_cards*/
-			File file = new File("blocked_id.txt");
-			
-			Scanner scanner = new Scanner(file);
-			while (scanner.hasNextLine()) {
-				String lineFromFile = scanner.nextLine();
-
-				/** Compares the id of the card with the contents of the file */
-				if(lineFromFile.contains(toHexString(data))) {
-					flag = true;
-					break;
-				}
-			}
-			
-			/** If the ID of the card is not in the block_id file then
-			 *  	the application continues normally
-			 *  else
-			 *  	the terminal sends the INS_BLOCK instruction to the card
-			 *  	and blocks the card
-			 */
-			if (flag == false){
-				return 1;
-			}else{
-				CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_BLOCK,(byte) 0,(byte) 0, BLOCKSIZE);
-				applet.transmit(capdu2);
-				return 0;
-			}
+			capdu = new CommandAPDU(CLA_WALLET, INS_BLOCK,(byte) 0,(byte) 0, BLOCKSIZE);
+			applet.transmit(capdu);
+			return 0;
 		}
 	}
 	
@@ -410,16 +398,19 @@ public class PoSTerminal extends JPanel implements ActionListener {
 
 		month = (short) (month + (short) 1);
 		
-		byte[] bl_date = new byte[4];
+		byte[] current_date = new byte[16];
 		
-		bl_date[0] = (byte)((year & 0xFF00) >> 8);
-		bl_date[1] = (byte)((year & 0x00FF) >> 0);
-		bl_date[2] = (byte)((month & 0xFF00) >> 8);
-		bl_date[3] = (byte)((month & 0x00FF) >> 0);
+		current_date[0] = (byte)((year & 0xFF00) >> 8);
+		current_date[1] = (byte)((year & 0x00FF) >> 0);
+		current_date[2] = (byte)((month & 0xFF00) >> 8);
+		current_date[3] = (byte)((month & 0x00FF) >> 0);
+		
+		/** Terminal encrypts the current date information and sends them to the card */
+		byte[] encrypted = encrypt(current_date,key_session);
 		
 		/** Sends to the card the current day and month */
-		CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_DATE,(byte) 0,(byte) 0,bl_date, BLOCKSIZE);
-		ResponseAPDU rapdu = applet.transmit(capdu);		
+		capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_DATE,(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
+		rapdu = applet.transmit(capdu);		
 		
 		if (rapdu.getSW() == 0x9000)
 			return 1;
@@ -433,59 +424,68 @@ public class PoSTerminal extends JPanel implements ActionListener {
 	 * @throws Exception 
 	 */
 	int authenticate() throws Exception{
-		/** Generates nonce of terminal */
-		SecureRandom random = new SecureRandom();
-	    byte nonce_t[] = new byte[16];
-	    random.nextBytes(nonce_t);
-	    
-	    /** Sends nonce to the card */
-	    CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_NONCE,(byte) 0, (byte) 0,nonce_t,BLOCKSIZE);
-		ResponseAPDU rapdu = applet.transmit(capdu);
+		/** Checks if the card has already been issued */
+		capdu = new CommandAPDU(CLA_WALLET, INS_CHECK_ISSUE,(byte) 0, (byte) 0,BLOCKSIZE);
+		rapdu = applet.transmit(capdu);
 		
-		/** Gets the nonce and id of the card as one byte array */
-		byte[] incoming = rapdu.getData();
+		byte[] result = rapdu.getData();
 
-		/** Splits the byte array to nonce of the card and id of the card*/
-	    byte nonce_c[] = Arrays.copyOf(incoming, 16);   
-	    id_c = Arrays.copyOfRange(incoming, 16,32);
-		
-	    /** Retrieves the symmetric key of the card */
-	    byte[] k_id = encrypt(id_c,key_m);	    
-	    SecretKey key_id = new SecretKeySpec(k_id, 0, k_id.length, "AES");
-	    
-	    /** XOR of nonces */
-	    byte[] nonce_combined = new byte[16];
-  		for (int i = 0; i < nonce_combined.length; i++) {
-    		nonce_combined[i] = (byte) (((int) nonce_t[i]) ^ ((int) nonce_c[i]));
-  		}
-
-	    /** Creates the session key */
-	    byte[] sessionkey = encrypt(nonce_combined,key_id);	    
-	    key_session = new SecretKeySpec(sessionkey, 0, sessionkey.length, "AES");
-	    
-	    /** Encrypts the nonce of card with the session key and send it to the card */
-	    byte[] data = encrypt(nonce_c,key_session);
-	    
-	    CommandAPDU capdu2 = new CommandAPDU(CLA_WALLET, INS_SESSION,(byte) 0, (byte) 0,data,BLOCKSIZE);
-		ResponseAPDU rapdu2 = applet.transmit(capdu2);
-		
-		/** If the card didn't authenticate the terminal, the communication stops. */
-		if (rapdu2.getSW() != 0x9000){
+		if (result[1] == 0){
 			return 0;
-		}
-		else{
-		
-			/** Gets the nonce of terminal encrypted with the session key */
-			byte[] encrypted = rapdu2.getData();
-			byte[] data_2 = decrypt(encrypted,key_session);
+		} else{		
+			/** Generates nonce of terminal */
+			SecureRandom random = new SecureRandom();
+			byte nonce_t[] = new byte[16];
+			random.nextBytes(nonce_t);
+		    
+			/** Sends nonce to the card */
+			capdu = new CommandAPDU(CLA_WALLET, INS_NONCE,(byte) 0, (byte) 0,nonce_t,BLOCKSIZE);
+			rapdu = applet.transmit(capdu);
+			
+			/** Gets the nonce and id of the card as one byte array */
+			byte[] incoming = rapdu.getData();
+	
+			/** Splits the byte array to nonce of the card and id of the card*/
+			byte nonce_c[] = Arrays.copyOf(incoming, 16);   
+			id_c = Arrays.copyOfRange(incoming, 16,32);
 
-			/** If the data_2 and the nonce_t are same, then the authentication has been established. */
-			if (Arrays.equals(nonce_t,data_2) == true)
-				return 1;
-			else
+			/** Retrieves the symmetric key of the card */
+			byte[] k_id = encrypt(id_c,key_m);	    
+			SecretKey key_id = new SecretKeySpec(k_id, 0, k_id.length, "AES");
+
+			/** XOR of nonces */
+			byte[] nonce_combined = new byte[16];
+	  		for (int i = 0; i < nonce_combined.length; i++) {
+	    			nonce_combined[i] = (byte) (((int) nonce_t[i]) ^ ((int) nonce_c[i]));
+	  		}
+	
+			/** Creates the session key */
+			byte[] sessionkey = encrypt(nonce_combined,key_id);	    
+			key_session = new SecretKeySpec(sessionkey, 0, sessionkey.length, "AES");
+
+			/** Encrypts the nonce of card with the session key and send it to the card */
+			byte[] data = encrypt(nonce_c,key_session);
+
+			capdu = new CommandAPDU(CLA_WALLET, INS_SESSION,(byte) 0, (byte) 0,data,BLOCKSIZE);
+			rapdu = applet.transmit(capdu);
+			
+			/** If the card didn't authenticate the terminal, the communication stops. */
+			if (rapdu.getSW() != 0x9000){
 				return 0;
+			}
+			else{
+			
+				/** Gets the nonce of terminal encrypted with the session key */
+				byte[] encrypted = rapdu.getData();
+				byte[] data_2 = decrypt(encrypted,key_session);
+	
+				/** If the data_2 and the nonce_t are same, then the authentication has been established. */
+				if (Arrays.equals(nonce_t,data_2) == true)
+					return 1;
+				else
+					return 0;
+			}
 		}
-	    
 	}
 	
 	/**
@@ -541,8 +541,8 @@ public class PoSTerminal extends JPanel implements ActionListener {
 			byte[] encrypted = encrypt(toencrypt,key_session);
 			
 			/** Sends the encrypted data to the card with INS_DEBIT instruction */
-			CommandAPDU capdu = new CommandAPDU(CLA_WALLET, INS_DEBIT,	(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
-			ResponseAPDU rapdu = applet.transmit(capdu);
+			capdu = new CommandAPDU(CLA_WALLET, INS_DEBIT,	(byte) 0,(byte) 0,encrypted, BLOCKSIZE);
+			rapdu = applet.transmit(capdu);
 			
 
 			if (rapdu.getSW() != 0x9000){
@@ -622,7 +622,7 @@ public class PoSTerminal extends JPanel implements ActionListener {
 		 * 
 		 */
 		
-		if ((java.util.Arrays.equals(hashed2,hashed_card) == true) && (data2[1] == counter_trans)){
+		if ((java.util.Arrays.equals(hashed2,hashed_card) == true) && (data2[1] == counter_trans) && (data2[0] == INS_DEBIT_OK)){
 			bw.write(t_counter + " | " + t_id + " | " + toHexString(id_c) + "| 0x" + Integer.toHexString(command) + " | " + amount + " | " + toHexString(signedvalue) + "| " + "1");
 			bw.newLine();
 			bw.close();
